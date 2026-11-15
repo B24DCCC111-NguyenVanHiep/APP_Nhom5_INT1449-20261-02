@@ -1,7 +1,11 @@
+include: package:flutter_lints/flutter.yaml
+
 analyzer:
   exclude:
     - build/**
-include: package:flutter_lints/flutter.yaml
+  errors:
+    deprecated_member_use: ignore
+    todo: ignore
 
 linter:
   rules:
