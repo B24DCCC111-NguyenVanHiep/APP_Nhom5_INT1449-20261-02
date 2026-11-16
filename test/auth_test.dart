@@ -13,7 +13,7 @@ void main() {
   databaseFactory = databaseFactoryFfi;
 
   final factories = <String, Future<AuthRepository> Function()>{
-    'InMemoryAuthRepository': () async => InMemoryAuthRepository(),
+    'InMemoryAuthRepository': () async => InMemoryAuthRepository(clear: true),
     'SqliteAuthRepository': () async {
       final db = await AppDatabase.open(path: inMemoryDatabasePath);
       return SqliteAuthRepository(db);
