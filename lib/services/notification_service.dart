@@ -1,9 +1,9 @@
 // FILE NÀY ĐỂ LÀM GÌ: Gửi thông báo khi người dùng đạt mục tiêu bước chân.
 // Người phụ trách: Người 5
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 /// NGƯỜI 5. Thông báo cục bộ khi đạt mục tiêu.
-/// TODO: thêm gói `flutter_local_notifications`; xin quyền POST_NOTIFICATIONS
-/// (Android 13+) đúng lúc người dùng bật nhắc.
 abstract class GoalNotifier {
   Future<void> init();
   Future<bool> requestPermission();
@@ -11,19 +11,88 @@ abstract class GoalNotifier {
 }
 
 class LocalGoalNotifier implements GoalNotifier {
-  @override
-  Future<void> init() => throw UnimplementedError();
+  LocalGoalNotifier({FlutterLocalNotificationsPlugin? plugin})
+      : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+
+  final FlutterLocalNotificationsPlugin _plugin;
+  bool _initialized = false;
 
   @override
-  Future<bool> requestPermission() => throw UnimplementedError();
+  Future<void> init() async {
+    if (_initialized) return;
+
+    const androidSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const darwinSettings = DarwinInitializationSettings();
+
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: darwinSettings,
+      macOS: darwinSettings,
+    );
+
+    await _plugin.initialize(initSettings);
+    _initialized = true;
+  }
 
   @override
-  Future<void> showGoalReached(int steps) => throw UnimplementedError();
+  Future<bool> requestPermission() async {
+    await init();
+    final androidImpl = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImpl != null) {
+      final granted = await androidImpl.requestNotificationsPermission();
+      return granted ?? false;
+    }
+
+    final darwinImpl = _plugin
+        .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>();
+    if (darwinImpl != null) {
+      final granted = await darwinImpl.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      return granted ?? false;
+    }
+
+    return true;
+  }
+
+  @override
+  Future<void> showGoalReached(int steps) async {
+    await init();
+
+    const androidDetails = AndroidNotificationDetails(
+      'step_tracker_goal_channel',
+      'Mục tiêu bước chân',
+      channelDescription: 'Thông báo chúc mừng khi hoàn thành mục tiêu ngày',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: DarwinNotificationDetails(),
+    );
+
+    await _plugin.show(
+      1001,
+      'Tuyệt vời! Đã đạt mục tiêu 🎉',
+      'Chúc mừng bạn đã hoàn thành $steps bước hôm nay!',
+      notificationDetails,
+    );
+  }
 }
 
 /// Bản giả cho test và demo.
 class FakeGoalNotifier implements GoalNotifier {
   int shown = 0;
+  int? lastNotifiedSteps;
 
   @override
   Future<void> init() async {}
@@ -32,7 +101,8 @@ class FakeGoalNotifier implements GoalNotifier {
   Future<bool> requestPermission() async => true;
 
   @override
-  Future<void> showGoalReached(int steps) async => shown++;
+  Future<void> showGoalReached(int steps) async {
+    shown++;
+    lastNotifiedSteps = steps;
+  }
 }
-
-// TODO: đếm bước khi app ở nền (foreground service hoặc workmanager).

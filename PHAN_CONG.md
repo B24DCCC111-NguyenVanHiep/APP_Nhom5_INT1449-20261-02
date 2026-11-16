@@ -46,6 +46,7 @@
 | `lib/services/notification_service.dart` | Gửi thông báo khi đạt mục tiêu |
 | `lib/data/friends_repository.dart` | Lấy và gửi số bước của bạn bè (bản giả, sau đó Firestore) |
 | `lib/ui/friends_screen.dart` | Màn hình bảng xếp hạng bạn bè |
+| `lib/ui/auth_screen.dart` | Màn hình đăng nhập/đăng ký (chọn tài khoản hoặc dùng dạng khách) |
 | `test/friends_test.dart` | Kiểm tra bảng xếp hạng đúng thứ tự |
 
 Việc chung của cả nhóm: README, báo cáo, slide (mỗi người viết phần của mình). Người 5 gom lại.
