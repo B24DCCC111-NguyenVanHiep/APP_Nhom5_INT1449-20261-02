@@ -2,16 +2,27 @@
 // Người phụ trách: Người 1
 
 /// NGƯỜI 1. Logic thuần, không phụ thuộc Flutter, để unit test.
+
 class StepCalculator {
   const StepCalculator();
 
-  /// TODO: số bước tăng thêm giữa hai lần đọc cảm biến cộng dồn.
-  /// Lưu ý: last == null (lần đầu) và current < last (máy khởi động lại).
-  int delta(int? last, int current) => throw UnimplementedError();
+  int delta(int? last, int current) {
+    if (last == null) return 0;
+    if (current <= 0) return 0;
+    if (current < last) return current;
+    return current - last;
+  }
 
-  /// TODO: đạt mục tiêu khi steps >= goal (goal <= 0 thì không bao giờ đạt).
-  bool reachedGoal(int steps, int goal) => throw UnimplementedError();
+  bool reachedGoal(int steps, int goal) {
+    if (goal <= 0) return false;
+    return steps >= goal;
+  }
 
-  /// TODO: tiến độ 0.0 - 1.0 để vẽ vòng tròn.
-  double progress(int steps, int goal) => throw UnimplementedError();
+  double progress(int steps, int goal) {
+    if (goal <= 0 || steps <= 0) return 0.0;
+    final ratio = steps / goal;
+    return ratio > 1.0 ? 1.0 : ratio;
+  }
+
+  int percent(int steps, int goal) => (progress(steps, goal) * 100).floor();
 }

@@ -3,15 +3,46 @@
 
 import 'step_sensor_service.dart';
 
-/// NGƯỜI 1. Bản giả cho chế độ demo (máy ảo không có cảm biến) và test.
-/// TODO: phát số bước cộng dồn tăng dần theo thời gian (Stream.periodic).
 class FakeStepSensorService implements StepSensorService {
-  @override
-  Stream<int> get cumulativeSteps => throw UnimplementedError();
+  FakeStepSensorService({
+    this.interval = const Duration(seconds: 1),
+    this.stepsPerTick = 5,
+    int initialSteps = 0,
+    this.permissionGranted = true,
+  })  : assert(stepsPerTick > 0, 'stepsPerTick phải lớn hơn 0'),
+        assert(initialSteps >= 0, 'initialSteps không được âm'),
+        _scripted = null,
+        _total = initialSteps;
+
+  FakeStepSensorService.scripted(
+    List<int> values, {
+    this.permissionGranted = true,
+  })  : interval = Duration.zero,
+        stepsPerTick = 0,
+        _scripted = List<int>.unmodifiable(values),
+        _total = 0;
+
+  final Duration interval;
+  final int stepsPerTick;
+  final bool permissionGranted;
+  final List<int>? _scripted;
+
+  int _total;
+
+  int get currentSteps => _total;
+
+  void simulateReboot() => _total = 0;
 
   @override
-  Future<bool> requestPermission() async => true;
+  Stream<int> get cumulativeSteps {
+    final values = _scripted;
+    if (values != null) return Stream<int>.fromIterable(values);
+    return Stream<int>.periodic(interval, (_) => _total += stepsPerTick);
+  }
 
   @override
-  Future<bool> hasPermission() async => true;
+  Future<bool> requestPermission() async => permissionGranted;
+
+  @override
+  Future<bool> hasPermission() async => permissionGranted;
 }
