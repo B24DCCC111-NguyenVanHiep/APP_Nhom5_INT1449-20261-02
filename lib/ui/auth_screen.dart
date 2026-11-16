@@ -1,52 +1,27 @@
 // FILE NÀY ĐỂ LÀM GÌ: Màn hình Đăng nhập / Đăng ký tài khoản cục bộ (Offline).
-// Người phụ trách: Người 5
-
-import 'dart:convert';
-import 'dart:io';
+// Người phụ trách: Người 5 & Người 2
 
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
 
+import '../data/app_database.dart';
+import '../data/auth_repository.dart';
+import '../data/sqlite_auth_repository.dart';
+import '../models/app_user.dart';
 import 'home_screen.dart';
 
-/// Thông tin người dùng
-class AppUser {
-  const AppUser({
-    required this.id,
-    required this.name,
-    required this.email,
-    this.isGuest = false,
-  });
-
-  final String id;
-  final String name;
-  final String email;
-  final bool isGuest;
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'email': email,
-        'isGuest': isGuest,
-      };
-
-  factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
-        id: json['id'] as String? ?? 'guest_id',
-        name: json['name'] as String? ?? 'Khách',
-        email: json['email'] as String? ?? '',
-        isGuest: json['isGuest'] as bool? ?? false,
-      );
-}
+export '../data/auth_repository.dart';
+export '../models/app_user.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
     super.key,
     this.allowGuest = true,
+    this.authRepository,
     this.onAuthenticated,
   });
 
   final bool allowGuest;
+  final AuthRepository? authRepository;
   final ValueChanged<AppUser>? onAuthenticated;
 
   @override
@@ -65,6 +40,8 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
+  AuthRepository? _internalRepo;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -74,44 +51,12 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  Future<File?> _getAccountsFile() async {
-    try {
-      final dbPath = await getDatabasesPath();
-      return File(p.join(dbPath, 'user_accounts.json'));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<File?> _getSessionFile() async {
-    try {
-      final dbPath = await getDatabasesPath();
-      return File(p.join(dbPath, 'user_profile.json'));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<Map<String, dynamic>> _readAccounts() async {
-    try {
-      final file = await _getAccountsFile();
-      if (file != null && await file.exists()) {
-        final content = await file.readAsString();
-        if (content.isNotEmpty) {
-          return jsonDecode(content) as Map<String, dynamic>;
-        }
-      }
-    } catch (_) {}
-    return <String, dynamic>{};
-  }
-
-  Future<void> _saveSession(AppUser user) async {
-    try {
-      final file = await _getSessionFile();
-      if (file == null) return;
-      await file.parent.create(recursive: true);
-      await file.writeAsString(jsonEncode(user.toJson()));
-    } catch (_) {}
+  Future<AuthRepository> _getRepo() async {
+    if (widget.authRepository != null) return widget.authRepository!;
+    if (_internalRepo != null) return _internalRepo!;
+    final db = await AppDatabase.open();
+    _internalRepo = SqliteAuthRepository(db);
+    return _internalRepo!;
   }
 
   Future<void> _handleSubmit() async {
@@ -124,57 +69,22 @@ class _AuthScreenState extends State<AuthScreen> {
     final name = _nameController.text.trim();
 
     try {
-      final accounts = await _readAccounts();
+      final repo = await _getRepo();
+      final AppUser user;
 
       if (_isLogin) {
-        // --- ĐĂNG NHẬP ---
-        if (!accounts.containsKey(email)) {
-          _showError('Tài khoản email này chưa được đăng ký!');
-          return;
-        }
-
-        final userData = accounts[email] as Map<String, dynamic>;
-        if (userData['password'] != password) {
-          _showError('Mật khẩu không chính xác!');
-          return;
-        }
-
-        final user = AppUser(
-          id: userData['id'] as String? ??
-              'user_${DateTime.now().millisecondsSinceEpoch}',
-          name: userData['name'] as String? ?? 'Người dùng',
-          email: email,
-          isGuest: false,
-        );
-
-        await _saveSession(user);
-        _finishAuth(user);
+        user = await repo.login(email: email, password: password);
       } else {
-        // --- ĐĂNG KÝ ---
-        if (accounts.containsKey(email)) {
-          _showError('Email này đã tồn tại! Vui lòng chọn đăng nhập.');
-          return;
-        }
-
-        final newId = 'user_${DateTime.now().millisecondsSinceEpoch}';
-        accounts[email] = {
-          'id': newId,
-          'name': name,
-          'password': password,
-          'created_at': DateTime.now().toIso8601String(),
-        };
-
-        final file = await _getAccountsFile();
-        if (file != null) {
-          await file.parent.create(recursive: true);
-          await file.writeAsString(jsonEncode(accounts));
-        }
-
-        final user =
-            AppUser(id: newId, name: name, email: email, isGuest: false);
-        await _saveSession(user);
-        _finishAuth(user);
+        user = await repo.register(
+          name: name,
+          email: email,
+          password: password,
+        );
       }
+
+      _finishAuth(user);
+    } on AuthException catch (e) {
+      _showError(e.message);
     } catch (e) {
       _showError('Đã có lỗi xảy ra: $e');
     } finally {
@@ -184,14 +94,18 @@ class _AuthScreenState extends State<AuthScreen> {
 
   /// Nút bấm: Dùng ở dạng khách
   Future<void> _continueAsGuest() async {
-    final guest = AppUser(
-      id: 'guest_${DateTime.now().millisecondsSinceEpoch}',
-      name: 'Khách',
-      email: '',
-      isGuest: true,
-    );
-    await _saveSession(guest);
-    _finishAuth(guest);
+    setState(() => _isLoading = true);
+    try {
+      final repo = await _getRepo();
+      final guest = await repo.loginAsGuest();
+      _finishAuth(guest);
+    } on AuthException catch (e) {
+      _showError(e.message);
+    } catch (e) {
+      _showError('Đã có lỗi xảy ra: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _finishAuth(AppUser user) {
@@ -320,8 +234,9 @@ class _AuthScreenState extends State<AuthScreen> {
                               ? Icons.visibility_off
                               : Icons.visibility,
                         ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                        onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
                       ),
                     ),
                     validator: (val) {
@@ -409,9 +324,13 @@ class _AuthScreenState extends State<AuthScreen> {
                         Expanded(child: Divider()),
                         Padding(
                           padding: EdgeInsets.symmetric(horizontal: 12),
-                          child: Text('HOẶC',
-                              style:
-                                  TextStyle(color: Colors.grey, fontSize: 12)),
+                          child: Text(
+                            'HOẶC',
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
                         Expanded(child: Divider()),
                       ],
@@ -421,14 +340,18 @@ class _AuthScreenState extends State<AuthScreen> {
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                         side: BorderSide(
-                            color: Colors.green.shade700, width: 1.5),
+                          color: Colors.green.shade700,
+                          width: 1.5,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                       onPressed: _continueAsGuest,
-                      icon:
-                          const Icon(Icons.person_outline, color: Colors.green),
+                      icon: const Icon(
+                        Icons.person_outline,
+                        color: Colors.green,
+                      ),
                       label: Text(
                         'Dùng ở dạng khách',
                         style: TextStyle(
