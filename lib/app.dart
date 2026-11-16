@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 
 import 'ui/auth_screen.dart';
-import 'ui/home_screen.dart';
 
 /// NGƯỜI 5. Gốc ứng dụng và nơi DUY NHẤT chọn bản thật hay bản giả.
 /// TODO: thêm gói `provider`; tạo StepsController, truyền sensor, repository,
