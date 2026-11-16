@@ -5,34 +5,64 @@ import '../models/daily_steps.dart';
 import 'step_repository.dart';
 
 /// NGƯỜI 2. Bản giả trong bộ nhớ, để người 3, 4 làm giao diện khi SQLite chưa xong.
-/// TODO: cài đặt bằng Map<String, DailySteps> (key = DailySteps.key).
+/// Cài đặt bằng Map<String, DailySteps> (key = DailySteps.key).
 class InMemoryStepRepository implements StepRepository {
-  @override
-  Future<void> saveDay(DailySteps day) => throw UnimplementedError();
+  final Map<String, DailySteps> _days = {};
+  int _goal = 8000;
+  int? _lastSensorValue;
+  DateTime? _lastGoalNotifiedDay;
 
   @override
-  Future<DailySteps?> getDay(DateTime date) => throw UnimplementedError();
+  Future<void> saveDay(DailySteps day) async {
+    _days[day.key] = day;
+  }
 
   @override
-  Future<List<DailySteps>> getRange(DateTime from, DateTime to) =>
-      throw UnimplementedError();
+  Future<DailySteps?> getDay(DateTime date) async {
+    final key = DailySteps(date, 0).key;
+    return _days[key];
+  }
 
   @override
-  Future<int> getGoal() => throw UnimplementedError();
+  Future<List<DailySteps>> getRange(DateTime from, DateTime to) async {
+    final fromDay = DailySteps.dayOf(from);
+    final toDay = DailySteps.dayOf(to);
+
+    final result = _days.values.where((d) {
+      return (d.date.isAtSameMomentAs(fromDay) || d.date.isAfter(fromDay)) &&
+          (d.date.isAtSameMomentAs(toDay) || d.date.isBefore(toDay));
+    }).toList();
+
+    result.sort((a, b) => a.date.compareTo(b.date));
+    return result;
+  }
 
   @override
-  Future<void> setGoal(int goal) => throw UnimplementedError();
+  Future<int> getGoal() async => _goal;
 
   @override
-  Future<int?> getLastSensorValue() => throw UnimplementedError();
+  Future<void> setGoal(int goal) async {
+    if (goal <= 0) {
+      throw StepRepositoryException(
+        'Mục tiêu số bước phải lớn hơn 0 (nhận $goal)',
+      );
+    }
+    _goal = goal;
+  }
 
   @override
-  Future<void> setLastSensorValue(int value) => throw UnimplementedError();
+  Future<int?> getLastSensorValue() async => _lastSensorValue;
 
   @override
-  Future<DateTime?> getLastGoalNotifiedDay() => throw UnimplementedError();
+  Future<void> setLastSensorValue(int value) async {
+    _lastSensorValue = value;
+  }
 
   @override
-  Future<void> setLastGoalNotifiedDay(DateTime day) =>
-      throw UnimplementedError();
+  Future<DateTime?> getLastGoalNotifiedDay() async => _lastGoalNotifiedDay;
+
+  @override
+  Future<void> setLastGoalNotifiedDay(DateTime day) async {
+    _lastGoalNotifiedDay = DailySteps.dayOf(day);
+  }
 }
