@@ -1,4 +1,4 @@
-// FILE NÀY ĐỂ LÀM GÌ: Màn hình bảng xếp hạng bạn bè (tự động ghi nhớ tên và nhóm khi tắt app).
+// FILE NÀY ĐỂ LÀM GÌ: Màn hình bảng xếp hạng bạn bè (BẮT BUỘC ĐĂNG NHẬP, Khách không được vào).
 // Người phụ trách: Người 5
 
 import 'dart:convert';
@@ -10,19 +10,18 @@ import 'package:provider/provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../data/friends_repository.dart';
+import 'auth_screen.dart';
 
-/// NGƯỜI 5. Bảng xếp hạng bạn bè theo mã nhóm.
+/// NGƯỜI 5. Bảng xếp hạng bạn bè theo mã nhóm (Bắt buộc phải có tài khoản).
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({
     super.key,
     this.repository,
     this.initialGroupCode = 'DEMO',
-    this.myUserId = 'current_user_id',
   });
 
   final FriendsRepository? repository;
   final String initialGroupCode;
-  final String myUserId;
 
   @override
   State<FriendsScreen> createState() => _FriendsScreenState();
@@ -32,9 +31,9 @@ enum _ScreenStatus { initial, loading, success, empty, error }
 
 class _FriendsScreenState extends State<FriendsScreen> {
   late final TextEditingController _groupController;
-  late final TextEditingController _nameController;
   late final TextEditingController _stepsController;
 
+  AppUser? _currentUser;
   _ScreenStatus _status = _ScreenStatus.initial;
   List<FriendEntry> _leaderboard = <FriendEntry>[];
   String? _errorMessage;
@@ -56,17 +55,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
   void initState() {
     super.initState();
     _groupController = TextEditingController(text: widget.initialGroupCode);
-    _nameController = TextEditingController(text: 'Văn Hiệp');
     _stepsController = TextEditingController(text: '8000');
 
-    // Tải thông tin người dùng đã lưu từ lần mở app trước
-    _loadSavedUserProfile();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_groupController.text.trim().isNotEmpty) {
-        _loadLeaderboard();
-      }
-    });
+    _checkLoginSession();
   }
 
   Future<File?> _getProfileFile() async {
@@ -78,51 +69,106 @@ class _FriendsScreenState extends State<FriendsScreen> {
     }
   }
 
-  Future<void> _loadSavedUserProfile() async {
+  Future<void> _checkLoginSession() async {
     try {
       final file = await _getProfileFile();
       if (file != null && await file.exists()) {
         final content = await file.readAsString();
         if (content.isNotEmpty) {
           final data = jsonDecode(content) as Map<String, dynamic>;
-          if (mounted) {
-            setState(() {
-              if (data['name'] != null && (data['name'] as String).isNotEmpty) {
-                _nameController.text = data['name'] as String;
-              }
-              if (data['groupCode'] != null &&
-                  (data['groupCode'] as String).isNotEmpty) {
-                _groupController.text = data['groupCode'] as String;
-              }
-            });
+          final user = AppUser.fromJson(data);
+          // Chỉ mở khóa nếu là tài khoản thật (không phải Khách)
+          if (!user.isGuest && user.email.isNotEmpty) {
+            if (mounted) {
+              setState(() {
+                _currentUser = user;
+                if (data['groupCode'] != null &&
+                    (data['groupCode'] as String).isNotEmpty) {
+                  _groupController.text = data['groupCode'] as String;
+                }
+              });
+              _loadLeaderboard();
+            }
+            return;
           }
         }
       }
     } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _currentUser = null;
+      });
+    }
   }
 
-  Future<void> _saveUserProfile() async {
+  Future<void> _saveCurrentGroup(String groupCode) async {
+    if (_currentUser == null) return;
     try {
       final file = await _getProfileFile();
       if (file == null) return;
-      final data = {
-        'name': _nameController.text.trim(),
-        'groupCode': _groupController.text.trim(),
-      };
-      await file.parent.create(recursive: true);
+      final data = _currentUser!.toJson();
+      data['groupCode'] = groupCode;
       await file.writeAsString(jsonEncode(data));
     } catch (_) {}
+  }
+
+  Future<void> _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đăng xuất'),
+        content: const Text(
+            'Bạn có chắc muốn đăng xuất? Khi đăng xuất bạn sẽ cần đăng nhập lại để xem thử thách.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Đăng xuất'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final file = await _getProfileFile();
+      if (file != null && await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+
+    setState(() {
+      _currentUser = null;
+      _leaderboard.clear();
+      _status = _ScreenStatus.initial;
+    });
+  }
+
+  /// Mở màn hình đăng nhập (không có nút Bỏ qua dạng khách vì thử thách bắt buộc tài khoản)
+  Future<void> _openAuthScreen() async {
+    await Navigator.of(context).push<AppUser>(
+      MaterialPageRoute(
+        builder: (_) => const AuthScreen(allowGuest: false),
+      ),
+    );
+    _checkLoginSession();
   }
 
   @override
   void dispose() {
     _groupController.dispose();
-    _nameController.dispose();
     _stepsController.dispose();
     super.dispose();
   }
 
   Future<void> _loadLeaderboard() async {
+    if (_currentUser == null) return;
+
     final groupCode = _groupController.text.trim();
     if (groupCode.isEmpty) {
       setState(() {
@@ -144,8 +190,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
         _leaderboard = list;
         _status = list.isEmpty ? _ScreenStatus.empty : _ScreenStatus.success;
       });
-      // Lưu lại mã nhóm cuối cùng người dùng tra cứu
-      _saveUserProfile();
+      _saveCurrentGroup(groupCode);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -156,24 +201,32 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   Future<void> _submitSteps() async {
+    if (_currentUser == null) return;
+
     final groupCode = _groupController.text.trim();
-    final name = _nameController.text.trim();
     final steps = int.tryParse(_stepsController.text.trim()) ?? 0;
 
-    if (groupCode.isEmpty || name.isEmpty) {
+    if (groupCode.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng nhập đủ mã nhóm và tên.')),
+        const SnackBar(content: Text('Vui lòng nhập mã nhóm.')),
       );
       return;
     }
 
     try {
-      await _repo.submitMySteps(groupCode, widget.myUserId, name, steps);
-      await _saveUserProfile();
+      await _repo.submitMySteps(
+        groupCode,
+        _currentUser!.id,
+        _currentUser!.name,
+        steps,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Đã cập nhật $steps bước cho "$name"!')),
+        SnackBar(
+          content: Text(
+              'Đã cập nhật $steps bước cho tài khoản "${_currentUser!.name}"!'),
+        ),
       );
       await _loadLeaderboard();
     } catch (e) {
@@ -185,34 +238,28 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   void _showSubmitDialog() {
+    if (_currentUser == null) return;
+
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cập nhật số bước của bạn'),
+        title: const Text('Cập nhật bước lên nhóm'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Tên hiển thị (tự nhớ khi tắt app)',
-                prefixIcon: Icon(Icons.person),
-              ),
+            Text(
+              'Tài khoản: ${_currentUser!.name}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _stepsController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Số bước chân',
+                labelText: 'Số bước chân hôm nay',
                 prefixIcon: Icon(Icons.directions_walk),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'ID máy: ${widget.myUserId}',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
@@ -239,12 +286,122 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
+  /// GIAO DIỆN BẮT BUỘC ĐĂNG NHẬP KHI VÀO THỬ THÁCH
+  Widget _buildRequireLoginView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.lock_person_rounded,
+                size: 70,
+                color: Colors.amber,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Bắt buộc có tài khoản',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Chế độ Thử thách bạn bè yêu cầu phải có tài khoản để ghi nhận kết quả và vinh danh trên bảng xếp hạng.\n\nNgười dùng ở dạng Khách không thể tham gia mục này.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5),
+            ),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52), // Vùng chạm >= 48dp
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: _openAuthScreen,
+              icon: const Icon(Icons.login_rounded),
+              label: const Text(
+                'Đăng nhập / Đăng ký để tiếp tục',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Thanh tài khoản của người dùng khi đã đăng nhập
+  Widget _buildAccountBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: Colors.green.shade700,
+            radius: 18,
+            child: Text(
+              _currentUser!.name.isNotEmpty
+                  ? _currentUser!.name[0].toUpperCase()
+                  : 'U',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _currentUser!.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                Text(
+                  _currentUser!.email,
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red.shade700,
+              minimumSize: const Size(48, 48), // Vùng chạm >= 48dp
+            ),
+            onPressed: _handleLogout,
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('Đăng xuất'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearchBar() {
     return Card(
-      margin: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 2,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Row(
           children: [
             Expanded(
@@ -296,7 +453,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline, size: 56, color: Colors.redAccent),
+                const Icon(Icons.error_outline,
+                    size: 56, color: Colors.redAccent),
                 const SizedBox(height: 12),
                 Text(
                   _errorMessage ?? 'Đã xảy ra lỗi khi tải dữ liệu.',
@@ -330,11 +488,12 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 Text(
                   'Chưa có ai trong nhóm "${_groupController.text.trim()}".',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Hãy là người đầu tiên tham gia và gửi số bước của mình!',
+                  'Hãy là người đầu tiên gửi số bước của mình lên nhóm!',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey),
                 ),
@@ -361,7 +520,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final entry = _leaderboard[index];
-              final isMe = entry.id == widget.myUserId;
+              final isMe =
+                  _currentUser != null && entry.id == _currentUser!.id;
               return _buildRankCard(index + 1, entry, isMe);
             },
           ),
@@ -371,24 +531,24 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   Widget _buildRankCard(int rank, FriendEntry entry, bool isMe) {
     Widget leadingWidget;
-    Color? medalColor;
 
     if (rank == 1) {
-      medalColor = Colors.amber;
-      leadingWidget = const Icon(Icons.emoji_events, color: Colors.amber, size: 32);
+      leadingWidget =
+          const Icon(Icons.emoji_events, color: Colors.amber, size: 32);
     } else if (rank == 2) {
-      medalColor = Colors.blueGrey.shade300;
-      leadingWidget = Icon(Icons.military_tech, color: medalColor, size: 30);
+      leadingWidget =
+          Icon(Icons.military_tech, color: Colors.blueGrey.shade300, size: 30);
     } else if (rank == 3) {
-      medalColor = Colors.brown.shade300;
-      leadingWidget = Icon(Icons.military_tech, color: medalColor, size: 28);
+      leadingWidget =
+          Icon(Icons.military_tech, color: Colors.brown.shade300, size: 28);
     } else {
       leadingWidget = CircleAvatar(
         radius: 16,
         backgroundColor: Colors.grey.shade200,
         child: Text(
           '$rank',
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+          style: const TextStyle(
+              fontWeight: FontWeight.bold, color: Colors.black87),
         ),
       );
     }
@@ -405,7 +565,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 : BorderSide.none),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: SizedBox(
           width: 40,
           child: Center(child: leadingWidget),
@@ -417,7 +578,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 entry.name,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontWeight: (rank <= 3 || isMe) ? FontWeight.bold : FontWeight.w500,
+                  fontWeight:
+                      (rank <= 3 || isMe) ? FontWeight.bold : FontWeight.w500,
                   fontSize: 16,
                 ),
               ),
@@ -425,14 +587,18 @@ class _FriendsScreenState extends State<FriendsScreen> {
             if (isMe) ...[
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.green,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Text(
                   'Tôi',
-                  style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -459,33 +625,41 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isLoggedIn = _currentUser != null && !_currentUser!.isGuest;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Thử thách bạn bè'),
         actions: [
-          IconButton(
-            tooltip: 'Làm mới',
-            style: IconButton.styleFrom(
-              minimumSize: const Size(48, 48), // Vùng chạm >= 48dp
+          if (isLoggedIn)
+            IconButton(
+              tooltip: 'Làm mới',
+              style: IconButton.styleFrom(
+                minimumSize: const Size(48, 48), // Vùng chạm >= 48dp
+              ),
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadLeaderboard,
             ),
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadLeaderboard,
-          ),
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildSearchBar(),
-            Expanded(child: _buildContent()),
-          ],
-        ),
+        child: isLoggedIn
+            ? Column(
+                children: [
+                  _buildAccountBar(),
+                  _buildSearchBar(),
+                  Expanded(child: _buildContent()),
+                ],
+              )
+            : _buildRequireLoginView(),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showSubmitDialog,
-        icon: const Icon(Icons.cloud_upload),
-        label: const Text('Gửi bước của tôi'),
-      ),
+      floatingActionButton: isLoggedIn
+          ? FloatingActionButton.extended(
+              onPressed: _showSubmitDialog,
+              icon: const Icon(Icons.cloud_upload),
+              label: const Text('Gửi bước của tôi'),
+            )
+          : null,
     );
   }
 }
