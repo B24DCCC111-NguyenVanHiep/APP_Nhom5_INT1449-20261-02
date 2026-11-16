@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import 'ui/auth_screen.dart';
 import 'ui/home_screen.dart';
 
 /// NGƯỜI 5. Gốc ứng dụng và nơi DUY NHẤT chọn bản thật hay bản giả.
@@ -17,7 +18,7 @@ class StepTrackerApp extends StatelessWidget {
     return MaterialApp(
       title: 'Theo dõi bước chân',
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.green),
-      home: const HomeScreen(),
+      home: const AuthScreen(),
     );
   }
 }

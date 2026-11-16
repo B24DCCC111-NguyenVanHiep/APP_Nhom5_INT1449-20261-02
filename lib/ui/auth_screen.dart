@@ -1,10 +1,12 @@
 // FILE NÀY ĐỂ LÀM GÌ: Màn hình Đăng nhập / Đăng ký tài khoản cục bộ (Offline).
 // Người phụ trách: Người 5 & Người 2
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../data/auth_repository.dart';
+import '../data/in_memory_auth_repository.dart';
 import '../data/sqlite_auth_repository.dart';
 import '../models/app_user.dart';
 import 'home_screen.dart';
@@ -54,9 +56,18 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<AuthRepository> _getRepo() async {
     if (widget.authRepository != null) return widget.authRepository!;
     if (_internalRepo != null) return _internalRepo!;
-    final db = await AppDatabase.open();
-    _internalRepo = SqliteAuthRepository(db);
-    return _internalRepo!;
+    if (kIsWeb) {
+      _internalRepo = InMemoryAuthRepository();
+      return _internalRepo!;
+    }
+    try {
+      final db = await AppDatabase.open();
+      _internalRepo = SqliteAuthRepository(db);
+      return _internalRepo!;
+    } catch (_) {
+      _internalRepo = InMemoryAuthRepository();
+      return _internalRepo!;
+    }
   }
 
   Future<void> _handleSubmit() async {
